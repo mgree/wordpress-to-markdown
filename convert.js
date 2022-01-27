@@ -153,14 +153,14 @@ async function processPost(post) {
     // takes the longest description candidate
     const description = [
         post.description,
-        ...post["wp:postmeta"].filter(
+        ...(post["wp:postmeta"] || []).filter(
             (meta) =>
                 meta["wp:meta_key"][0].includes("metadesc") ||
                 meta["wp:meta_key"][0].includes("description")
         ),
     ].sort((a, b) => b.length - a.length)[0];
 
-    const heroURLs = post["wp:postmeta"]
+    const heroURLs = (post["wp:postmeta"] || [])
         .filter(
             (meta) =>
                 meta["wp:meta_key"][0].includes("opengraph-image") ||
