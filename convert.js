@@ -58,7 +58,7 @@ function constructImageName({ urlParts, buffer }) {
             .replace(/\//g, "-")
             .replace(/\*/g, "")
     );
-    const { ext } = imageType(new Buffer(buffer));
+    const { ext } = imageType(Buffer.from(buffer));
 
     return `${pathParts.name}.${ext}`;
 }
@@ -91,7 +91,7 @@ async function processImage({ url, postData, images, directory }) {
             postData = postData.replace(url, `./img/${imageName}`);
             images = [...images, `./img/${imageName}`];
 
-            fs.writeFileSync(`${filePath}/${imageName}`, new Buffer(buffer));
+            fs.writeFileSync(`${filePath}/${imageName}`, new Buffer.from(buffer));
         }
     } catch (e) {
         console.log(`Keeping ref to ${url}`);
