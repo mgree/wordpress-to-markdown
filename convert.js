@@ -177,10 +177,10 @@ async function processComment({ c, directory }) {
             frontmatter.push(`email: "${c['wp:comment_author_email'][0].replace('"', '\"')}"`);
         }
         if (c['wp:comment_author_url'][0]) {
-            frontmatter.push(`email: "${c['wp:comment_author_url'][0].replace('"', '\"')}"`);
+            frontmatter.push(`url: "${c['wp:comment_author_url'][0].replace('"', '\"')}"`);
         }
     } catch (e) {
-        console.log("----------- BAD TIME", c);
+        console.log("----------- BAD COMMENT", c);
         throw e;
     }
     frontmatter.push('---');
