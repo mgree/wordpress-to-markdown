@@ -22,9 +22,8 @@ const stringify = require("remark-stringify");
 const imageType = require("image-type");
 
 // includes all sorts of edge cases and weird stuff
-processExport("test-wordpress-dump.xml");
+processExport("weaselhat.WordPress.2022-01-27.xml");
 // full dump
-// processExport("ageekwithahat.wordpress.2020-08-22 (1).xml");
 
 function processExport(file) {
     const parser = new xml2js.Parser();
@@ -131,6 +130,70 @@ async function processImages({ postData, directory }) {
     return [postData, images];
 }
 
+function convertToMarkdown(data) {
+    return new Promise((resolve, reject) => {
+        unified()
+            .use(parseHTML, {
+                fragment: true,
+                emitParseErrors: true,
+                duplicateAttribute: false,
+            })
+            .use(fixCodeBlocks)
+            .use(fixEmbeds)
+            .use(rehype2remark)
+            .use(cleanupShortcodes)
+            .use(stringify, {
+                fences: true,
+                listItemIndent: 1,
+                gfm: false,
+                pedantic: false,
+            })
+            .process(fixBadHTML(data), (err, markdown) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    let content = markdown.contents;
+                    content = content.replace(
+                        /(?<=https?:\/\/.*)\\_(?=.*\n)/g,
+                        "_"
+                    );
+                    resolve(prettier.format(content, { parser: "markdown" }));
+                }
+            });
+    });
+}
+
+async function processComment({ c, directory }) {
+    const fname = c['wp:comment_id'][0] + "_" + c["wp:comment_author_email"];
+
+    let frontmatter = ["---"];
+    try {
+        frontmatter.push(`date: "c['wp:comment_date_gmt']"`);
+
+        if (c['wp:comment_author'][0]) {
+            frontmatter.push(`author: "${c['wp:comment_author'][0].replace('"', '\"')}"`);
+        }
+        if (c['wp:comment_author_email'][0]) {
+            frontmatter.push(`email: "${c['wp:comment_author_email'][0].replace('"', '\"')}"`);
+        }
+        if (c['wp:comment_author_url'][0]) {
+            frontmatter.push(`email: "${c['wp:comment_author_url'][0].replace('"', '\"')}"`);
+        }
+    } catch (e) {
+        console.log("----------- BAD TIME", c);
+        throw e;
+    }
+    frontmatter.push('---');
+
+    const markdown = await convertToMarkdown(c['wp:comment_content'][0]);
+
+    fs.writeFile(
+        `out/${directory}/comments/${fname}`,
+        frontmatter.join("\n") + '\n' + markdown,
+        function (err) {}
+    );
+}
+
 async function processPost(post) {
     console.log("Processing Post");
 
@@ -150,17 +213,19 @@ async function processPost(post) {
         .replace(/\*/g, "");
     console.log("Post slug: " + slug);
 
+    const postmeta = post["wp:postmeta"] || []; 
+
     // takes the longest description candidate
     const description = [
         post.description,
-        ...(post["wp:postmeta"] || []).filter(
+        ...postmeta.filter(
             (meta) =>
                 meta["wp:meta_key"][0].includes("metadesc") ||
                 meta["wp:meta_key"][0].includes("description")
         ),
     ].sort((a, b) => b.length - a.length)[0];
 
-    const heroURLs = (post["wp:postmeta"] || [])
+    const heroURLs = postmeta
         .filter(
             (meta) =>
                 meta["wp:meta_key"][0].includes("opengraph-image") ||
@@ -172,7 +237,7 @@ async function processPost(post) {
     let heroImage = "";
 
     let directory = slug;
-    let fname = `index.mdx`;
+    let fname = `index.md`;
 
     try {
         fs.mkdirSync(`out/${directory}`);
@@ -200,39 +265,19 @@ async function processPost(post) {
 
     [postData, images] = await processImages({ postData, directory });
 
+    const comments = post["wp:comment"] || [];
+    if (comments.length > 0) {
+        fs.mkdirSync(`out/${directory}/comments`);
+
+        for (let c of comments) {
+            await processComment({ c, directory });
+        }
+    }
+
+
     heroImage = images.find((img) => !img.endsWith("gif"));
 
-    const markdown = await new Promise((resolve, reject) => {
-        unified()
-            .use(parseHTML, {
-                fragment: true,
-                emitParseErrors: true,
-                duplicateAttribute: false,
-            })
-            .use(fixCodeBlocks)
-            .use(fixEmbeds)
-            .use(rehype2remark)
-            .use(cleanupShortcodes)
-            .use(stringify, {
-                fences: true,
-                listItemIndent: 1,
-                gfm: false,
-                pedantic: false,
-            })
-            .process(fixBadHTML(postData), (err, markdown) => {
-                if (err) {
-                    reject(err);
-                } else {
-                    let content = markdown.contents;
-                    content = content.replace(
-                        /(?<=https?:\/\/.*)\\_(?=.*\n)/g,
-                        "_"
-                    );
-                    resolve(prettier.format(content, { parser: "mdx" }));
-                }
-            });
-    });
-
+    const markdown = await convertToMarkdown(postData);
     try {
         postTitle.replace("\\", "\\\\").replace(/"/g, '\\"');
     } catch (e) {
@@ -240,8 +285,10 @@ async function processPost(post) {
     }
 
     const redirect_from = post.link[0]
-        .replace("https://swizec.com", "")
-        .replace("https://www.swizec.com", "");
+        .replace("https://weaselhat.com", "")
+        .replace("https://www.weaselhat.com", "")
+        .replace("http://weaselhat.com", "")
+        .replace("http://www.weaselhat.com", "");
     let frontmatter;
     try {
         frontmatter = [
