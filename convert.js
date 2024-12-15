@@ -57,9 +57,15 @@ function constructImageName({ urlParts, buffer }) {
             .replace(/\//g, "-")
             .replace(/\*/g, "")
     );
-    const { ext } = imageType(Buffer.from(buffer));
 
-    return `${pathParts.name}.${ext}`;
+    let dot_ext = pathParts.ext;
+
+    try {
+        const { ext } = imageType(Buffer.from(buffer));
+        dot_ext = "." + ext;
+    } catch (e) { }
+
+    return `${pathParts.name}${dot_ext}`;
 }
 
 async function processImage({ url, postData, images, directory }) {
@@ -93,7 +99,7 @@ async function processImage({ url, postData, images, directory }) {
             fs.writeFileSync(`${filePath}/${imageName}`, new Buffer.from(buffer));
         }
     } catch (e) {
-        console.log(`Keeping ref to ${url}`);
+        console.log(`Keeping ref to ${url} (${e})`);
     }
 
     return [postData, images];
@@ -166,32 +172,38 @@ function convertToMarkdown(data) {
 async function processComment({ c, directory }) {
     const fname = c['wp:comment_id'][0] + "_" + c["wp:comment_author_email"];
 
-    let frontmatter = ["---"];
+    let comment = ['<article class="comment">'];
     try {
-        frontmatter.push(`date: "c['wp:comment_date_gmt']"`);
+        const author = c['wp:comment_author'][0];
+        const email = c['wp:comment_author_email'][0];
+        const website = c['wp:comment_author_url'][0];
 
-        if (c['wp:comment_author'][0]) {
-            frontmatter.push(`author: "${c['wp:comment_author'][0].replace('"', '\"')}"`);
+        let authorName = author;
+        if (email) {
+            if (website) {
+                authorName = `[${authorName} (${email})](${website})`;
+            } else {
+                authorName = `[${authorName} (${email})](mailto:${email})`;
+            }
+        } else {
+            if (website) {
+                authorName = `[${authorName}](${website})`;
+            }
         }
-        if (c['wp:comment_author_email'][0]) {
-            frontmatter.push(`email: "${c['wp:comment_author_email'][0].replace('"', '\"')}"`);
-        }
-        if (c['wp:comment_author_url'][0]) {
-            frontmatter.push(`url: "${c['wp:comment_author_url'][0].replace('"', '\"')}"`);
-        }
+        comment.push(`<span class="commenter">\n\n${authorName}\n\n</span>`);
+
+        const dateTime = c['wp:comment_date_gmt'];
+        comment.push(`<time datetime="${dateTime}">${dateTime}</time>`);
     } catch (e) {
         console.log("----------- BAD COMMENT", c);
         throw e;
     }
-    frontmatter.push('---');
 
     const markdown = await convertToMarkdown(c['wp:comment_content'][0]);
+    comment.push(markdown);
+    comment.push('</article>\n');
 
-    fs.writeFile(
-        `out/${directory}/comments/${fname}`,
-        frontmatter.join("\n") + '\n' + markdown,
-        function (err) {}
-    );
+    return comment.join("\n");
 }
 
 async function processPost(post) {
@@ -200,6 +212,8 @@ async function processPost(post) {
     const postTitle =
         typeof post.title === "string" ? post.title : post.title[0];
     console.log("Post title: " + postTitle);
+    const postId = post["wp:post_id"];
+    console.log("Post id: " + postId);
     const postDate = isFinite(new Date(post.pubDate))
         ? new Date(post.pubDate)
         : new Date(post["wp:post_date"]);
@@ -213,7 +227,12 @@ async function processPost(post) {
         .replace(/\*/g, "");
     console.log("Post slug: " + slug);
 
-    const postmeta = post["wp:postmeta"] || []; 
+    if (post["wp:status"] == 'draft') {
+        console.log("DRAFT, skipping");
+        return;
+    }
+
+    const postmeta = post["wp:postmeta"] || [];
 
     // takes the longest description candidate
     const description = [
@@ -265,19 +284,22 @@ async function processPost(post) {
 
     [postData, images] = await processImages({ postData, directory });
 
-    const comments = post["wp:comment"] || [];
-    if (comments.length > 0) {
-        fs.mkdirSync(`out/${directory}/comments`);
-
-        for (let c of comments) {
-            await processComment({ c, directory });
-        }
-    }
-
-
     heroImage = images.find((img) => !img.endsWith("gif"));
 
-    const markdown = await convertToMarkdown(postData);
+    let markdown = await convertToMarkdown(postData);
+
+    const comments = post["wp:comment"] || [];
+    if (comments.length > 0) {
+        markdown += '\n';
+        markdown += '<div class="comments">\n';
+
+        for (let c of comments) {
+            markdown += await processComment({ c, directory });
+        }
+
+        markdown += '</div>\n';
+    }
+
     try {
         postTitle.replace("\\", "\\\\").replace(/"/g, '\\"');
     } catch (e) {
@@ -295,8 +317,9 @@ async function processPost(post) {
             "---",
             `title: '${postTitle.replace(/'/g, "''")}'`,
             `description: "${description}"`,
-            `published: ${format(postDate, "yyyy-MM-dd")}`,
-            `redirect_from: 
+            `date: ${format(postDate, "yyyy-MM-dd HH:mm:ss")}`,
+            `id: ${postId}`,
+            `redirect_from:
             - ${redirect_from}`,
         ];
     } catch (e) {
@@ -308,7 +331,9 @@ async function processPost(post) {
         frontmatter.push(`categories: "${categories.join(", ")}"`);
     }
 
-    frontmatter.push(`hero: ${heroImage || "../../../defaultHero.jpg"}`);
+    if (heroImage) {
+        frontmatter.push(`hero: ${heroImage}`);
+    }
     frontmatter.push("---");
     frontmatter.push("");
 

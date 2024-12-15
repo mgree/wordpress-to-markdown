@@ -41,7 +41,8 @@
         "unified": "^9.1.0",
         "unist-util-map": "^2.0.1",
         "unist-util-visit": "^2.0.3",
-        "xml2js": "~0.4.23"
+        "xml2js": "~0.4.23",
+        "yarn": "^1.22.22"
     },
     "main": "convert.js"
 }
